@@ -5,9 +5,12 @@ var ecs = new AWS.ECS();
 console.log('Loading function');
 
 exports.handler = (event, context, callback) => {
-    console.log("Invocation with event =", event);
+    console.log(JSON.stringify(event));
+    var eventParams = JSON.parse(event["CodePipeline.job"].data.actionConfiguration.configuration.UserParameters);
+
+    console.log(JSON.stringify(eventParams.service));
     var taskParams = {
-      taskDefinition: event.taskdef
+      taskDefinition: eventParams.taskdef
     };
     ecs.describeTaskDefinition(taskParams, function(err, data) {
      if (err) console.log(err, err.stack); // an error occurred
@@ -23,13 +26,13 @@ exports.handler = (event, context, callback) => {
          var image = oldParams.containerDefinitions[0].image;
          console.log(image);
          image = image.substr(0, image.lastIndexOf(":"));
-         image += ":"+event.tag;
+         image += ":"+eventParams.tag;
          console.log(image);
          ecs.registerTaskDefinition(oldParams, function(err, data) {
              if (err) console.error(err, JSON.stringify(err.stack)); // an error occurred need to m
              else {
                  console.log(data);
-                 var serviceParams = { taskDefinition: event.taskdef, cluster: event.cluster, service: event.service };
+                 var serviceParams = { taskDefinition: eventParams.taskdef, cluster: eventParams.cluster, service: eventParams.service };
                  ecs.updateService(serviceParams, function(err, data) {
                   if (err) console.log(err, err.stack); // an error occurred
                   else {
