@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: 'AWS::Serverless-2016-10-31'
 Resources:
-  MyFunction:
+  Deploy:
     Type: 'AWS::Serverless::Function'
     Properties:
       Handler: index.handler
@@ -9,3 +9,4 @@ Resources:
       CodeUri: ./
       Policies:
         - AmazonEC2ContainerServiceFullAccess
+        - AWSCodePipelineCustomActionAccess
