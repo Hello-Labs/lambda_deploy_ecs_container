@@ -5,6 +5,7 @@ var ecs = new AWS.ECS();
 console.log('Loading function');
 
 exports.handler = (event, context, callback) => {
+  console.log(JSON.stringify(event));
   var codepipeline = new AWS.CodePipeline();
     var jobId = event["CodePipeline.job"].id;
   var putJobSuccess = function(message) {
@@ -26,10 +27,10 @@ exports.handler = (event, context, callback) => {
   var taskParams = {
     taskDefinition: eventParams.taskdef
   };
+  // describeTaskDefinition so we can make a new revision
   ecs.describeTaskDefinition(taskParams, function(err, data) {
     if (err) console.log(err, err.stack); // an error occurred
     else {
-      console.log(JSON.stringify(data));
       //copy existing taskDefinition
       var oldParams = data.taskDefinition;
       // remove params that aren't accepted
@@ -37,25 +38,89 @@ exports.handler = (event, context, callback) => {
       delete oldParams.revision;
       delete oldParams.status;
       delete oldParams.requiresAttributes;
+      // override the image with the new one. Currenlty its tied to the latest image.
+      // TODO setup way to get new image tag from the S3 input artifact
       var image = oldParams.containerDefinitions[0].image;
-      console.log(image);
+
       image = image.substr(0, image.lastIndexOf(":"));
       image += ":" + eventParams.tag;
-      console.log(image);
+      // make the new revision
       ecs.registerTaskDefinition(oldParams, function(err, data) {
         if (err) context.fail(err); // an error occurred need to m
         else {
-          console.log(data);
+          console.log(JSON.stringify(data));
+          var newTaskDef = data.taskDefinition.taskDefinitionArn;
           var serviceParams = {
-            taskDefinition: eventParams.taskdef,
+            taskDefinition: newTaskDef,
             cluster: eventParams.cluster,
             service: eventParams.service
           };
+
+          // Run migrations
+          var migrationTask = {
+            taskDefinition: newTaskDef,
+            cluster: eventParams.cluster,
+            overrides: {
+                containerOverrides: [
+              {
+                name: "docker-web",
+                command: [
+                "sh",
+                "-c",
+                "bundle exec rake db:migrate"
+              ]}
+            ]
+            },
+            placementConstraints: [{
+              type: "distinctInstance"
+            }],
+            placementStrategy: [{
+              type: "random"
+            }]
+          };
+
+          ecs.runTask(migrationTask, function(err, data) {
+            if (err) context.fail(err.stack); // an error occurred
+            else {
+                console.log("Running Migrations:"+JSON.stringify(data));
+                putJobSuccess(data);
+                if (data.failures.length) context.fail(JSON.stringify(data.failures));
+                else {
+                    var params = {
+                      cluster: eventParams.cluster,
+                      tasks: [
+                        data.tasks[0].taskArn
+                      ],
+                    };
+                    ecs.waitFor('tasksRunning', params, function(err, data) {
+                      if (err) console.log(err, err.stack); // an error occurred
+                      else     console.log(data);           // successful response
+                    });
+              }
+            }
+          });
+
+          // deploy latest revision to the Service.
           ecs.updateService(serviceParams, function(err, data) {
-            if (err) context.fail(err); // an error occurred
+            if (err) context.fail(err.stack); // an error occurred
             else {
               putJobSuccess(data);
-              console.log(data); // successful response
+              console.log("Service updated: "+JSON.stringify(data));
+                var serivceWaitParams = {
+                    cluster: eventParams.cluster,
+                    services: [
+                        eventParams.service
+                  ]
+                };
+                console.log("WaitFor Service to be stable.");
+                ecs.waitFor('servicesStable', serivceWaitParams, function(err, data) {
+                  if (err) console.log(err, err.stack); // an error occurred
+                  else {
+                    console.log(data);           // successful response
+                    callback(null, 'Everything is ok!');
+                  }
+                });
+
             }
 
           });
@@ -65,5 +130,5 @@ exports.handler = (event, context, callback) => {
     } // successful response
   });
 
-  callback(null, 'Everything is ok!');
+
 };
