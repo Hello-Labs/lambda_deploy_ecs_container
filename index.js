@@ -63,7 +63,7 @@ exports.handler = (event, context, callback) => {
             overrides: {
                 containerOverrides: [
               {
-                name: "docker-web",
+                name: eventParams.containerName,
                 command: [
                 "sh",
                 "-c",
