@@ -6,8 +6,11 @@ console.log('Loading function');
 
 exports.handler = (event, context, callback) => {
   console.log(JSON.stringify(event));
+
   var codepipeline = new AWS.CodePipeline();
-    var jobId = event["CodePipeline.job"].id;
+  var jobId = event["CodePipeline.job"].id;
+
+  // Notify AWS CodePipeline of a Successful job
   var putJobSuccess = function(message) {
     var params = {
       jobId: jobId
@@ -20,6 +23,22 @@ exports.handler = (event, context, callback) => {
       }
     });
   };
+
+  // Notify AWS CodePipeline of a failed job
+  var putJobFailure = function(message) {
+    var params = {
+      jobId: jobId,
+      failureDetails: {
+        message: JSON.stringify(message),
+        type: 'JobFailed',
+        externalExecutionId: context.invokeid
+      }
+    };
+    codepipeline.putJobFailureResult(params, function(err, data) {
+      context.fail(message);
+    });
+  };
+
   console.log(JSON.stringify(event));
   var eventParams = JSON.parse(event["CodePipeline.job"].data.actionConfiguration.configuration.UserParameters);
 
@@ -67,7 +86,7 @@ exports.handler = (event, context, callback) => {
                 command: [
                 "sh",
                 "-c",
-                "bundle exec rake db:migrate"
+                "bundle exec rake db:create db:migrate"
               ]}
             ]
             },
@@ -106,14 +125,14 @@ exports.handler = (event, context, callback) => {
             else {
               putJobSuccess(data);
               console.log("Service updated: "+JSON.stringify(data));
-                var serivceWaitParams = {
+                var serviceWaitParams = {
                     cluster: eventParams.cluster,
                     services: [
                         eventParams.service
                   ]
                 };
                 console.log("WaitFor Service to be stable.");
-                ecs.waitFor('servicesStable', serivceWaitParams, function(err, data) {
+                ecs.waitFor('servicesStable', serviceWaitParams, function(err, data) {
                   if (err) console.log(err, err.stack); // an error occurred
                   else {
                     console.log(data);           // successful response
